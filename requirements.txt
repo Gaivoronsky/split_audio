@@ -1,0 +1,4 @@
+matplotlib~=3.3.2
+numpy~=1.19.2
+resemblyzer~=0.1.1.dev0
+soundfile~=0.10.3.post1
