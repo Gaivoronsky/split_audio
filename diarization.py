@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import soundfile as sf
 import argparse
+import json
 import os
 
 from tqdm import tqdm
@@ -26,6 +27,8 @@ def create_parser():
     parser.add_argument("--add_time", help="adding time for voice", default=0.3, type=float)
     parser.add_argument("--device", help="device for calculations", default='cpu')
     parser.add_argument("--dir_save", help="directory for save files", default='data')
+    parser.add_argument("--json", help="output file json", action="store_true")
+    parser.add_argument("--save_split", help="output audio files", default=True, type=bool)
     return parser
 
 
@@ -108,7 +111,17 @@ def split_wav(wav, sr, timeline, add_time, min_len_audio, dir_save, start_from=N
                 voice_file_name = f'{voice_file_name}.wav'
 
                 sf.write(voice_file_name, wav[int(start * sr): int(end * sr) + int(add_time * sr)], sr)
-
+    
+    
+def write_json(timeline, piece):
+    list_time = []
+    for idx, (label, start, end) in enumerate(voise_iterator):
+        if min_len_audio < end - start:
+            list_time.append({'start_time': start, 'end_time': end})
+    data = {'speech_segments': list_time}
+    with open(f'{piece}.json', 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=4)
+            
 
 def from_dir(dir):
     '''
@@ -150,7 +163,7 @@ def diarize(args):
 
     encoder = VoiceEncoder(args.device, verbose=False)
 
-    def wav_proccecing(args, piece=None, start_from=None):
+    def wav_proccecing(args, piece=None, start_from=None, save_file=True, json_file=False):
         '''
         :param args: parameters from console
         :param piece: If not the whole file (only piece) was given (name and path_to_dir)
@@ -177,11 +190,14 @@ def diarize(args):
         change_moments, names = get_change_moments(similarity_dict, wav_splits_seconds, args.plot)
         if start_from:
             change_moments = [t for t in change_moments]
-
+    
         diarized_fragments = get_fragment_parts(change_moments, names)
-
-        split_wav(wav, sr_0, diarized_fragments, dir_save=piece['path_to_dir'], add_time=args.add_time,
+        
+        if save_file:
+            split_wav(wav, sr_0, diarized_fragments, dir_save=piece['path_to_dir'], add_time=args.add_time,
                   min_len_audio=args.min_len_audio, start_from=start_from)
+        if json_file:
+            write_json(diarized_fragments, piece)
 
         return diarized_fragments
 
