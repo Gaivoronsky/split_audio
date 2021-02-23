@@ -194,8 +194,13 @@ def diarize(args):
         diarized_fragments = get_fragment_parts(change_moments, names)
         
         if save_file:
-            split_wav(wav, sr_0, diarized_fragments, dir_save=piece['path_to_dir'], add_time=args.add_time,
-                  min_len_audio=args.min_len_audio, start_from=start_from)
+            if isinstance(piece, dict):
+                split_wav(wav, sr_0, diarized_fragments, dir_save=piece['path_to_dir'], add_time=args.add_time,
+                          min_len_audio=args.min_len_audio, start_from=start_from)
+            else:
+                split_wav(wav, sr_0, diarized_fragments, dir_save=args.dir_save, add_time=args.add_time,
+                          min_len_audio=args.min_len_audio, start_from=start_from)
+        
         if json_file:
             write_json(diarized_fragments, piece)
 
