@@ -201,9 +201,10 @@ def diarize(args):
 
         return diarized_fragments
 
+    
+    diarized_fragments = {}
     if not os.path.isfile(args.audio):
         files = from_dir(args.audio)
-        diarized_fragments = {}
     else:
         files = [args.audio, ]
 
