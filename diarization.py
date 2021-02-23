@@ -18,6 +18,7 @@ def create_parser():
     :return ArgumentParser representing the command line arguments that were supplied to the command line:
     """
     parser = argparse.ArgumentParser()
+    parser.add_argument("-d", help="saving new wav files", default=False, action='store_const', const=True)
     parser.add_argument("--audio", help="audio fragment or directory with them")
     parser.add_argument("--noise", help="audio fragment with noise")
     parser.add_argument("--voice", help="audio fragment with voice")
@@ -94,7 +95,7 @@ def get_fragment_parts(change_moments, names, ):
     return res
 
 
-def split_wav(wav, sr, timeline, add_time, min_len_audio, dir_save, start_from=None):
+def split_wav(wav, sr, timeline, add_time, min_len_audio, dir_save, start_from=None, download=True):
     voise_iterator = tqdm(timeline, ascii=True, leave=False)
     for idx, (label, start, end) in enumerate(voise_iterator):
         voise_iterator.set_description(f'{label} fragment {idx} processing', refresh=True)
@@ -110,18 +111,9 @@ def split_wav(wav, sr, timeline, add_time, min_len_audio, dir_save, start_from=N
 
                 voice_file_name = f'{voice_file_name}.wav'
 
-                sf.write(voice_file_name, wav[int(start * sr): int(end * sr) + int(add_time * sr)], sr)
-    
-    
-def write_json(timeline, piece):
-    list_time = []
-    for idx, (label, start, end) in enumerate(voise_iterator):
-        if min_len_audio < end - start:
-            list_time.append({'start_time': start, 'end_time': end})
-    data = {'speech_segments': list_time}
-    with open(f'{piece}.json', 'w', encoding='utf-8') as f:
-        json.dump(data, f, indent=4)
-            
+                if download:
+                    sf.write(voice_file_name, wav[int(start * sr): int(end * sr) + int(add_time * sr)], sr)
+
 
 def from_dir(dir):
     '''
@@ -157,8 +149,26 @@ def cut_wav_on_parts(wav, cuts_on):
     return file_names, total_secs
 
 
+def write_json(files, diarized_fragments, args):
+    for i, file in enumerate(files):
+        json_name = os.path.splitext(os.path.basename(file))[0]
+        if isinstance(diarized_fragments, dict):
+            json_data = []
+            for part in diarized_fragments[file]:
+                start_from = diarized_fragments[file][part]['start_from']
+                data_part = list(map(lambda i: [i[0], i[1] + start_from, i[2] + start_from],
+                                     diarized_fragments[file][part]['data']))
+                json_data.extend(data_part)
+        else:
+            json_data = diarized_fragments
+
+        json_data = [i for i in json_data if i[0] == 'voice']  # noise filter
+        with open(f'{json_name}.json', 'w', encoding='utf-8') as f:
+            json.dump(json_data, f, indent=4)
+
+
 def diarize(args):
-    if not os.path.exists(f'./{args.dir_save}/'):
+    if not os.path.exists(f'./{args.dir_save}/') and args.d:
         os.mkdir(f'./{args.dir_save}/')
 
     encoder = VoiceEncoder(args.device, verbose=False)
@@ -170,7 +180,6 @@ def diarize(args):
         :param start_from: for the beauty of new file naming and for correctly display the time interval
         :return: info about postprocessing
         '''
-
         if isinstance(piece, dict):
             wav, sr_0 = read_file(piece['name'])
         else:
@@ -190,18 +199,22 @@ def diarize(args):
         change_moments, names = get_change_moments(similarity_dict, wav_splits_seconds, args.plot)
         if start_from:
             change_moments = [t for t in change_moments]
-    
+
         diarized_fragments = get_fragment_parts(change_moments, names)
-        
-        if save_file:
-            split_wav(wav, sr_0, diarized_fragments, dir_save=piece['path_to_dir'], add_time=args.add_time,
-                  min_len_audio=args.min_len_audio, start_from=start_from)
-        if json_file:
-            write_json(diarized_fragments, piece)
+
+        if isinstance(piece, dict):
+            dir_for_file = piece['path_to_dir']
+        else:
+            if not os.path.isfile(args.audio):
+                dir_for_file = os.path.splitext(os.path.basename(piece))[0]
+                dir_for_file = os.path.join(args.dir_save, dir_for_file)
+            else:
+                dir_for_file = args.dir_save
+
+        split_wav(wav, sr_0, diarized_fragments, dir_save=dir_for_file, add_time=args.add_time, min_len_audio=args.min_len_audio, start_from=start_from, download=args.d)
 
         return diarized_fragments
 
-    
     diarized_fragments = {}
     if not os.path.isfile(args.audio):
         files = from_dir(args.audio)
@@ -214,26 +227,33 @@ def diarize(args):
         catalog_per_audio = os.path.splitext(os.path.basename(file))[0]
         if len(files) > 1:
             dir_for_parts = os.path.join(args.dir_save, catalog_per_audio)
-            if not os.path.exists(dir_for_parts):
+            if not os.path.exists(dir_for_parts) and args.d:
                 os.makedirs(dir_for_parts)
         else:
             dir_for_parts = args.dir_save
 
+        piece = {}
         if args.cuts_on:
             parts, total_secs = cut_wav_on_parts(file, args.cuts_on)
-            piece = {}
             iterator = tqdm(parts.keys(), leave=False)
+            diarized_fragments[file] = {}
             for i, part in enumerate(iterator):
+                diarized_fragments[file][part] = {}
                 piece['name'] = part
                 piece['path_to_dir'] = dir_for_parts
 
-                iterator.set_description(f'{parts[part]["begin"]}-{parts[part]["end"]} sec (total: {total_secs}) processing')
+                iterator.set_description(
+                    f'{parts[part]["begin"]}-{parts[part]["end"]} sec (total: {total_secs}) processing')
 
-                diarized_fragments[file] = wav_proccecing(args, piece, start_from=i * args.cuts_on) # TYT
+                diarized_fragments[file][part]['start_from'] = i * args.cuts_on
+                diarized_fragments[file][part]['data'] = wav_proccecing(args, piece, start_from=i * args.cuts_on)  # TYT
                 os.remove(part)
 
         else:
             diarized_fragments = wav_proccecing(args, file)
+
+    if args.json:
+        write_json(files, diarized_fragments, args)
 
     return diarized_fragments
 
@@ -241,4 +261,5 @@ def diarize(args):
 if __name__ == '__main__':
     parser = create_parser()
     args = parser.parse_args()
+    assert args.d or args.json, 'Please select "-d" or "--json"!'
     diarize(args)
